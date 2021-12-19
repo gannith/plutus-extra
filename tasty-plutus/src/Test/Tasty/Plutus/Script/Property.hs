@@ -36,8 +36,8 @@ module Test.Tasty.Plutus.Script.Property (
   scriptPropertyPass,
 ) where
 
-import Control.Monad.RWS.Strict (tell)
-import Control.Monad.Reader (Reader, ask, asks, runReader)
+import Control.Monad.RWS.Strict (MonadReader (ask), tell)
+import Control.Monad.Reader (Reader, asks, runReader)
 import Data.Kind (Type)
 import Data.Proxy (Proxy (Proxy))
 import Data.Sequence qualified as Seq
@@ -45,13 +45,13 @@ import Data.Tagged (Tagged (Tagged))
 import Data.Text (Text)
 import Plutus.V1.Ledger.Contexts (ScriptContext)
 import Plutus.V1.Ledger.Scripts (
-  MintingPolicy,
+  MintingPolicy (getMintingPolicy),
   ScriptError (
     EvaluationError,
     EvaluationException,
     MalformedScript
   ),
-  Validator,
+  Validator (getValidator),
  )
 import Test.QuickCheck (
   Args (maxSize, maxSuccess),
@@ -72,6 +72,7 @@ import Test.Tasty.Plutus.Internal.Context (
   Purpose (ForMinting, ForSpending),
   TransactionConfig,
  )
+import Test.Tasty.Plutus.Internal.DumpScript (DumpingScript (DumpingScript))
 import Test.Tasty.Plutus.Internal.Env (
   SomeScript (SomeMinter, SomeSpender),
   getContext,
@@ -224,17 +225,19 @@ mkScriptPropertyWith ::
 mkScriptPropertyWith outKind name generator = case generator of
   GenForSpending (Methodology gen shrinker) f ->
     WithSpending $ do
-      val <- ask
+      (val, code) <- ask
       tell
         . Seq.singleton
         . singleTest name
+        . DumpingScript name (getValidator val) code
         $ Spender val gen shrinker f outKind
   GenForMinting (Methodology gen shrinker) f ->
     WithMinting $ do
-      mp <- ask
+      (mp, code) <- ask
       tell
         . Seq.singleton
         . singleTest name
+        . DumpingScript name (getMintingPolicy mp) code
         $ Minter mp gen shrinker f outKind
 
 data PropertyTest (a :: Type) (p :: Purpose) where

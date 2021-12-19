@@ -5,7 +5,8 @@ module Test.Tasty.Plutus.Internal.WithScript (
 import Control.Monad.RWS.Strict (MonadReader (ask, local), RWS)
 import Data.Kind (Type)
 import Data.Sequence (Seq)
-import Plutus.V1.Ledger.Api (MintingPolicy, Validator)
+import Plutus.V1.Ledger.Api (MintingPolicy, ScriptContext, Validator)
+import PlutusTx (CompiledCode)
 import Test.Tasty.Plutus.Internal.Context (
   Purpose (ForMinting, ForSpending),
  )
@@ -30,11 +31,19 @@ import Test.Tasty.Providers (TestTree)
 data WithScript (p :: Purpose) (a :: Type) where
   WithSpending ::
     forall (a :: Type) (d :: Type) (r :: Type).
-    RWS Validator (Seq TestTree) () a ->
+    RWS
+      (Validator, CompiledCode (d -> r -> ScriptContext -> Bool))
+      (Seq TestTree)
+      ()
+      a ->
     WithScript ( 'ForSpending d r) a
   WithMinting ::
     forall (a :: Type) (r :: Type).
-    RWS MintingPolicy (Seq TestTree) () a ->
+    RWS
+      (MintingPolicy, CompiledCode (r -> ScriptContext -> Bool))
+      (Seq TestTree)
+      ()
+      a ->
     WithScript ( 'ForMinting r) a
 
 -- | @since 1.0
@@ -71,14 +80,22 @@ instance Monad (WithScript ( 'ForMinting r)) where
     ys
 
 -- | @since 3.0
-instance MonadReader Validator (WithScript ( 'ForSpending d r)) where
+instance
+  MonadReader
+    (Validator, CompiledCode (d -> r -> ScriptContext -> Bool))
+    (WithScript ( 'ForSpending d r))
+  where
   {-# INLINEABLE ask #-}
   ask = WithSpending ask
   {-# INLINEABLE local #-}
   local f (WithSpending comp) = WithSpending . local f $ comp
 
 -- | @since 3.0
-instance MonadReader MintingPolicy (WithScript ( 'ForMinting r)) where
+instance
+  MonadReader
+    (MintingPolicy, CompiledCode (r -> ScriptContext -> Bool))
+    (WithScript ( 'ForMinting r))
+  where
   {-# INLINEABLE ask #-}
   ask = WithMinting ask
   {-# INLINEABLE local #-}

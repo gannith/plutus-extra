@@ -31,7 +31,7 @@ module Test.Tasty.Plutus.Script.Unit (
 ) where
 
 import Control.Arrow ((>>>))
-import Control.Monad.Reader (Reader, asks, runReader)
+import Control.Monad.Reader (MonadReader (ask), Reader, asks, runReader)
 import Control.Monad.Writer (tell)
 import Data.Kind (Type)
 import Data.Proxy (Proxy (Proxy))
@@ -40,15 +40,13 @@ import Data.Tagged (Tagged (Tagged))
 import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
-import Plutus.V1.Ledger.Api (ScriptContext)
+import Plutus.V1.Ledger.Api (MintingPolicy (getMintingPolicy), ScriptContext, Validator (getValidator))
 import Plutus.V1.Ledger.Scripts (
-  MintingPolicy,
   ScriptError (
     EvaluationError,
     EvaluationException,
     MalformedScript
   ),
-  Validator,
  )
 import Test.Tasty.Options (
   OptionDescription (Option),
@@ -60,6 +58,7 @@ import Test.Tasty.Plutus.Internal.Context (
   Purpose (ForMinting, ForSpending),
   TransactionConfig,
  )
+import Test.Tasty.Plutus.Internal.DumpScript (DumpingScript (DumpingScript))
 import Test.Tasty.Plutus.Internal.Env (
   SomeScript (SomeMinter, SomeSpender),
   getContext,
@@ -126,13 +125,7 @@ shouldValidate ::
   TestData p ->
   ContextBuilder p ->
   WithScript p ()
-shouldValidate name td cb = case td of
-  SpendingTest {} -> WithSpending $ do
-    tt <- asks (singleTest name . Spender Pass Nothing td cb)
-    tell . Seq.singleton $ tt
-  MintingTest {} -> WithMinting $ do
-    tt <- asks (singleTest name . Minter Pass Nothing td cb)
-    tell . Seq.singleton $ tt
+shouldValidate = addUnitTest Pass Nothing
 
 {- | Specify that, given this test data and context, as well as a predicate on
  the entire trace:
@@ -150,13 +143,7 @@ shouldValidateTracing ::
   TestData p ->
   ContextBuilder p ->
   WithScript p ()
-shouldValidateTracing name f td cb = case td of
-  SpendingTest {} -> WithSpending $ do
-    tt <- asks (singleTest name . Spender Pass (Just f) td cb)
-    tell . Seq.singleton $ tt
-  MintingTest {} -> WithMinting $ do
-    tt <- asks (singleTest name . Minter Pass (Just f) td cb)
-    tell . Seq.singleton $ tt
+shouldValidateTracing name f = addUnitTest Pass (Just f) name
 
 {- | Specify that, given this test data and context, the validation should fail.
 
@@ -169,13 +156,7 @@ shouldn'tValidate ::
   TestData p ->
   ContextBuilder p ->
   WithScript p ()
-shouldn'tValidate name td cb = case td of
-  SpendingTest {} -> WithSpending $ do
-    tt <- asks (singleTest name . Spender Fail Nothing td cb)
-    tell . Seq.singleton $ tt
-  MintingTest {} -> WithMinting $ do
-    tt <- asks (singleTest name . Minter Fail Nothing td cb)
-    tell . Seq.singleton $ tt
+shouldn'tValidate = addUnitTest Fail Nothing
 
 {- | Specify that, given this test data and context, as well as a predicate on
  the entire trace:
@@ -193,15 +174,40 @@ shouldn'tValidateTracing ::
   TestData p ->
   ContextBuilder p ->
   WithScript p ()
-shouldn'tValidateTracing name f td cb = case td of
-  SpendingTest {} -> WithSpending $ do
-    tt <- asks (singleTest name . Spender Fail (Just f) td cb)
-    tell . Seq.singleton $ tt
-  MintingTest {} -> WithMinting $ do
-    tt <- asks (singleTest name . Minter Fail (Just f) td cb)
-    tell . Seq.singleton $ tt
+shouldn'tValidateTracing name f = addUnitTest Fail (Just f) name
 
 -- Helpers
+
+addUnitTest ::
+  forall (p :: Purpose).
+  (Typeable p) =>
+  Outcome ->
+  Maybe (Vector Text -> Bool) ->
+  String ->
+  TestData p ->
+  ContextBuilder p ->
+  WithScript p ()
+addUnitTest out trace name td cb = case td of
+  SpendingTest {} -> WithSpending $ do
+    (scr, code) <- ask
+    tt <-
+      asks
+        ( singleTest name
+            . DumpingScript name (getValidator scr) code
+            . Spender out trace td cb
+            . fst
+        )
+    tell . Seq.singleton $ tt
+  MintingTest {} -> WithMinting $ do
+    (scr, code) <- ask
+    tt <-
+      asks
+        ( singleTest name
+            . DumpingScript name (getMintingPolicy scr) code
+            . Minter out trace td cb
+            . fst
+        )
+    tell . Seq.singleton $ tt
 
 data ScriptTest (p :: Purpose) where
   Spender ::
